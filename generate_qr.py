@@ -172,20 +172,11 @@ def parse_sheet(rows):
 
     amounts = _extract_amounts(header_row, sums_row)
 
-    total = None
-    for cell in sums_row:
-        try:
-            val = float(cell.replace(",", ".").replace(" ", ""))
-            if val > 0:
-                total = val
-                break
-        except ValueError:
-            continue
-
-    if total is None or not amounts:
+    if not amounts:
         return {"error": "no_sums"}
 
-    return {"account": None, "total": total, "amounts": amounts}
+    # No global total column in this format — total is unknown
+    return {"account": None, "total": None, "amounts": amounts}
 
 
 def generate_html(sheets_data):
@@ -229,11 +220,9 @@ def generate_html(sheets_data):
           <div class="no-account">&#x26A0;&#xFE0F; Nebylo nalezeno číslo účtu kam platit.</div>
         </div>""")
 
-        account_line = (
-            f"Platit na: <strong>{account}</strong> &nbsp;|&nbsp; Celkem: <strong>{int(total):,} Kč</strong>"
-            if account
-            else f"&#x26A0;&#xFE0F; Číslo účtu nenalezeno &nbsp;|&nbsp; Celkem: <strong>{int(total):,} Kč</strong>"
-        )
+        total_str = f"<strong>{int(total):,} Kč</strong>" if total is not None else "<em>nevím</em>"
+        account_str = f"Platit na: <strong>{account}</strong>" if account else "&#x26A0;&#xFE0F; Číslo účtu nenalezeno"
+        account_line = f"{account_str} &nbsp;|&nbsp; Celkem: {total_str}"
 
         sections.append(f"""
   <section>
