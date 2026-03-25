@@ -15,7 +15,7 @@ from pathlib import Path
 import qrcode
 import requests
 
-SPREADSHEET_ID = "15dbO9aipE8n4KSD34QdvW8VYlHiOVtd3tqYi_TDetFk"
+SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "")
 API_KEY = os.environ.get("GOOGLE_API_KEY", "")
 DOCS_DIR = Path("docs")
 QR_DIR = DOCS_DIR / "qr"
@@ -283,6 +283,8 @@ def generate_html(sheets_data):
 def main():
     if not API_KEY:
         raise SystemExit("GOOGLE_API_KEY environment variable not set")
+    if not SPREADSHEET_ID:
+        raise SystemExit("SPREADSHEET_ID environment variable not set")
 
     shutil.rmtree(QR_DIR, ignore_errors=True)
     QR_DIR.mkdir(parents=True, exist_ok=True)
