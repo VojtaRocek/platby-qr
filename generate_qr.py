@@ -20,6 +20,8 @@ API_KEY = os.environ.get("GOOGLE_API_KEY", "")
 DOCS_DIR = Path("docs")
 QR_DIR = DOCS_DIR / "qr"
 
+SKIP_HEADERS = {"v bal.", "czk", "cena za ks.", "kusu", "-", "sumy"}
+
 
 def get_visible_sheets():
     """Return list of visible sheets: [{name, gid}, ...]"""
@@ -67,7 +69,6 @@ def czk_to_iban(account_str):
 def make_spd_string(iban, amount_czk, recipient_name):
     """Return Czech SPD QR payload string."""
     amount = f"{float(amount_czk):.2f}"
-    # MSG is limited to 60 chars, strip diacritics-safe truncation
     msg = recipient_name[:60]
     return f"SPD*1.0*ACC:{iban}*AM:{amount}*CC:CZK*MSG:{msg}*"
 
@@ -86,41 +87,91 @@ def save_qr(spd_string, filepath):
     img.save(filepath)
 
 
+def _extract_amounts(header_row, sums_row):
+    """Extract {name: amount} from header and sums rows."""
+    amounts = {}
+    for col_idx, name in enumerate(header_row):
+        name = name.strip()
+        if not name:
+            continue
+        if name.lower() in SKIP_HEADERS:
+            continue
+        if "." in name and "/" not in name:
+            continue
+        if col_idx >= len(sums_row):
+            continue
+        amount_str = sums_row[col_idx].strip().replace(",", ".").replace(" ", "")
+        try:
+            amount = float(amount_str)
+        except ValueError:
+            continue
+        if amount > 0:
+            amounts[name] = amount
+    return amounts
+
+
 def parse_sheet(rows):
     """
-    Parse a sheet and return:
-      {
-        'header': [name1, name2, ...],   # person names
-        'amounts': {name: amount, ...},  # only non-zero
-        'account': '1234567/0100',
-        'total': 22740,
-      }
-    or None if the sheet doesn't match the expected format.
+    Parse a sheet and return one of:
+      {'account': '...', 'total': N, 'amounts': {...}}   — full data, QR codes can be generated
+      {'account': None,  'total': N, 'amounts': {...}}   — sums found, but no account number
+      {'error': 'no_sums'}                               — cannot find any sums at all
     """
-    # Find the "platit na" row — contains "platit" (case-insensitive)
+    # --- Strategy 1: look for a "platit na" row (search all columns) ---
     platit_idx = None
     for i, row in enumerate(rows):
-        if row and "platit" in row[0].lower():
+        if row and any("platit" in cell.lower() for cell in row):
             platit_idx = i
             break
 
-    if platit_idx is None or platit_idx == 0:
-        return None
+    if platit_idx is not None and platit_idx > 0:
+        platit_text = " ".join(rows[platit_idx])
+        account_match = re.search(r"(\d[\d-]*/\d+)", platit_text)
+        account = account_match.group(1) if account_match else None
 
-    # Extract account number from "platit na" row
-    platit_text = " ".join(rows[platit_idx])
-    account_match = re.search(r"(\d[\d-]*/\d+)", platit_text)
-    if not account_match:
-        return None
-    account = account_match.group(1)
+        sums_row = rows[platit_idx - 1]
+        header_row = rows[0]
+        amounts = _extract_amounts(header_row, sums_row)
 
-    # Sums row is immediately above the "platit na" row
-    sums_row = rows[platit_idx - 1]
+        total = None
+        for cell in sums_row:
+            try:
+                val = float(cell.replace(",", ".").replace(" ", ""))
+                if val > 0:
+                    total = val
+                    break
+            except ValueError:
+                continue
 
-    # Header row is always row 0
-    header_row = rows[0]
+        if total is None or not amounts:
+            return {"error": "no_sums"}
 
-    # Total = first non-empty numeric cell in sums_row
+        return {"account": account, "total": total, "amounts": amounts}
+
+    # --- Strategy 2: look for a "Sumy" section header ---
+    sumy_idx = None
+    for i, row in enumerate(rows):
+        if row and row[0].strip().lower() == "sumy":
+            sumy_idx = i
+            break
+
+    if sumy_idx is None:
+        return {"error": "no_sums"}
+
+    header_row = rows[sumy_idx]
+
+    # Sums row = last non-empty row after the Sumy header
+    sums_row = None
+    for row in reversed(rows[sumy_idx + 1:]):
+        if any(c.strip() for c in row):
+            sums_row = row
+            break
+
+    if sums_row is None:
+        return {"error": "no_sums"}
+
+    amounts = _extract_amounts(header_row, sums_row)
+
     total = None
     for cell in sums_row:
         try:
@@ -131,38 +182,10 @@ def parse_sheet(rows):
         except ValueError:
             continue
 
-    if total is None:
-        return None
+    if total is None or not amounts:
+        return {"error": "no_sums"}
 
-    # Find which columns have person names (non-empty, non-numeric in header)
-    # and match amounts in sums_row
-    amounts = {}
-    for col_idx, name in enumerate(header_row):
-        name = name.strip()
-        if not name:
-            continue
-        # Skip known non-person header labels
-        if name.lower() in {"v bal.", "czk", "cena za ks.", "kusu", "-", "sumy"}:
-            continue
-        # Skip cells that look like URLs or sheet metadata
-        if "." in name and "/" not in name:
-            continue
-        # Get the corresponding amount from sums_row
-        if col_idx >= len(sums_row):
-            continue
-        amount_str = sums_row[col_idx].strip().replace(",", ".").replace(" ", "")
-        try:
-            amount = float(amount_str)
-        except ValueError:
-            continue
-        if amount > 0:
-            amounts[name] = amount
-
-    return {
-        "account": account,
-        "total": total,
-        "amounts": amounts,
-    }
+    return {"account": None, "total": total, "amounts": amounts}
 
 
 def generate_html(sheets_data):
@@ -171,31 +194,54 @@ def generate_html(sheets_data):
     for sheet in sheets_data:
         name = sheet["name"]
         data = sheet["data"]
-        if not data or not data["amounts"]:
+
+        if data.get("error") == "no_sums":
+            sections.append(f"""
+  <section>
+    <h2>{name}</h2>
+    <p class="warning">&#x26A0;&#xFE0F; Vidím tab, nevidím sumy.</p>
+  </section>""")
             continue
 
+        amounts = data.get("amounts", {})
+        if not amounts:
+            continue
+
+        account = data.get("account")
+        total = data.get("total")
+
         cards = []
-        for person, amount in sorted(data["amounts"].items()):
-            qr_file = f"qr/{sheet['qr_prefix']}_{person}.png"
-            amount_fmt = f"{int(amount):,}".replace(",", "\u00a0")  # non-breaking space
-            cards.append(
-                f"""
+        for person, amount in sorted(amounts.items()):
+            amount_fmt = f"{int(amount):,}".replace(",", "\u00a0")
+            if account:
+                qr_file = f"qr/{sheet['qr_prefix']}_{person}.png"
+                cards.append(f"""
         <div class="card">
           <div class="person">{person}</div>
           <div class="amount">{amount_fmt} Kč</div>
           <img src="{qr_file}" alt="QR platba {person}" />
-        </div>"""
-            )
+        </div>""")
+            else:
+                cards.append(f"""
+        <div class="card">
+          <div class="person">{person}</div>
+          <div class="amount">{amount_fmt} Kč</div>
+          <div class="no-account">&#x26A0;&#xFE0F; Nebylo nalezeno číslo účtu kam platit.</div>
+        </div>""")
 
-        sections.append(
-            f"""
+        account_line = (
+            f"Platit na: <strong>{account}</strong> &nbsp;|&nbsp; Celkem: <strong>{int(total):,} Kč</strong>"
+            if account
+            else f"&#x26A0;&#xFE0F; Číslo účtu nenalezeno &nbsp;|&nbsp; Celkem: <strong>{int(total):,} Kč</strong>"
+        )
+
+        sections.append(f"""
   <section>
     <h2>{name}</h2>
-    <p class="account">Platit na: <strong>{data['account']}</strong> &nbsp;|&nbsp; Celkem: <strong>{int(data['total']):,} Kč</strong></p>
+    <p class="account">{account_line}</p>
     <div class="cards">{"".join(cards)}
     </div>
-  </section>"""
-        )
+  </section>""")
 
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).strftime("%d. %m. %Y %H:%M UTC")
@@ -215,12 +261,14 @@ def generate_html(sheets_data):
                box-shadow: 0 1px 4px rgba(0,0,0,.1); }}
     h2 {{ font-size: 1.25rem; margin-bottom: 0.5rem; color: #1a1a1a; }}
     .account {{ font-size: 0.9rem; color: #555; margin-bottom: 1.2rem; }}
+    .warning {{ color: #b45309; font-size: 0.95rem; }}
     .cards {{ display: flex; flex-wrap: wrap; gap: 1.2rem; }}
     .card {{ background: #fafafa; border: 1px solid #eee; border-radius: 10px;
              padding: 1rem; text-align: center; min-width: 160px; }}
     .person {{ font-weight: 600; font-size: 1.05rem; margin-bottom: 0.3rem; }}
     .amount {{ font-size: 1.4rem; font-weight: 700; color: #1a6b3c; margin-bottom: 0.8rem; }}
     .card img {{ width: 160px; height: 160px; display: block; margin: 0 auto; }}
+    .no-account {{ font-size: 0.8rem; color: #b45309; margin-top: 0.4rem; max-width: 160px; }}
   </style>
 </head>
 <body>
@@ -236,7 +284,6 @@ def main():
     if not API_KEY:
         raise SystemExit("GOOGLE_API_KEY environment variable not set")
 
-    # Prepare output dirs
     shutil.rmtree(QR_DIR, ignore_errors=True)
     QR_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -250,37 +297,39 @@ def main():
             rows = get_sheet_csv(sheet["gid"])
         except Exception as e:
             print(f"  ERROR fetching CSV: {e}")
+            sheets_data.append({"name": sheet["name"], "data": {"error": "no_sums"}, "qr_prefix": ""})
             continue
 
         data = parse_sheet(rows)
-        if not data:
-            print(f"  Skipping — could not parse (no 'platit na' row?)")
-            continue
-
-        iban = czk_to_iban(data["account"])
-        if not iban:
-            print(f"  Skipping — could not convert account '{data['account']}' to IBAN")
-            continue
-
-        print(f"  Account: {data['account']} → IBAN: {iban}")
-        print(f"  Total: {data['total']} | Persons: {list(data['amounts'].keys())}")
-
-        # Generate QR codes
         safe_name = re.sub(r"[^\w]", "_", sheet["name"])
-        for person, amount in data["amounts"].items():
-            spd = make_spd_string(iban, amount, person)
-            safe_person = re.sub(r"[^\w]", "_", person)
-            qr_path = QR_DIR / f"{safe_name}_{safe_person}.png"
-            save_qr(spd, qr_path)
-            print(f"  QR: {qr_path} ({spd[:60]}...)")
 
-        sheets_data.append({
-            "name": sheet["name"],
-            "data": data,
-            "qr_prefix": safe_name,
-        })
+        if data.get("error") == "no_sums":
+            print(f"  No sums found — will show warning in HTML")
+            sheets_data.append({"name": sheet["name"], "data": data, "qr_prefix": safe_name})
+            continue
 
-    # Generate HTML
+        account = data.get("account")
+        if account:
+            iban = czk_to_iban(account)
+            if not iban:
+                print(f"  Invalid account '{account}' — treating as missing")
+                data["account"] = None
+                iban = None
+        else:
+            iban = None
+
+        print(f"  Account: {account or 'NOT FOUND'} | Total: {data['total']} | Persons: {list(data['amounts'].keys())}")
+
+        if iban:
+            for person, amount in data["amounts"].items():
+                spd = make_spd_string(iban, amount, person)
+                safe_person = re.sub(r"[^\w]", "_", person)
+                qr_path = QR_DIR / f"{safe_name}_{safe_person}.png"
+                save_qr(spd, qr_path)
+                print(f"  QR: {qr_path}")
+
+        sheets_data.append({"name": sheet["name"], "data": data, "qr_prefix": safe_name})
+
     html = generate_html(sheets_data)
     (DOCS_DIR / "index.html").write_text(html, encoding="utf-8")
     print(f"\nGenerated docs/index.html with {len(sheets_data)} sections")
