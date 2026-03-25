@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Platební QR kódy</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f5f5f5; color: #222; padding: 2rem 1rem; }
+    h1 { font-size: 1.6rem; margin-bottom: 0.3rem; }
+    .updated { color: #888; font-size: 0.85rem; margin-bottom: 2.5rem; }
+    section { background: white; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem;
+               box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+    h2 { font-size: 1.25rem; margin-bottom: 0.5rem; color: #1a1a1a; }
+    .account { font-size: 0.9rem; color: #555; margin-bottom: 1.2rem; }
+    .cards { display: flex; flex-wrap: wrap; gap: 1.2rem; }
+    .card { background: #fafafa; border: 1px solid #eee; border-radius: 10px;
+             padding: 1rem; text-align: center; min-width: 160px; }
+    .person { font-weight: 600; font-size: 1.05rem; margin-bottom: 0.3rem; }
+    .amount { font-size: 1.4rem; font-weight: 700; color: #1a6b3c; margin-bottom: 0.8rem; }
+    .card img { width: 160px; height: 160px; display: block; margin: 0 auto; }
+  </style>
+</head>
+<body>
+  <h1>Platební QR kódy</h1>
+  <p class="updated">Aktualizováno: 25. 03. 2026 08:15 UTC</p>
+  
+  <section>
+    <h2>2025M12 Marada</h2>
+    <p class="account">Platit na: <strong>1000516028/3030</strong> &nbsp;|&nbsp; Celkem: <strong>22,740 Kč</strong></p>
+    <div class="cards">
+        <div class="card">
+          <div class="person">Eda</div>
+          <div class="amount">6 860 Kč</div>
+          <img src="qr/2025M12_Marada_Eda.png" alt="QR platba Eda" />
+        </div>
+        <div class="card">
+          <div class="person">Rezzi</div>
+          <div class="amount">3 940 Kč</div>
+          <img src="qr/2025M12_Marada_Rezzi.png" alt="QR platba Rezzi" />
+        </div>
+        <div class="card">
+          <div class="person">cisticz</div>
+          <div class="amount">3 480 Kč</div>
+          <img src="qr/2025M12_Marada_cisticz.png" alt="QR platba cisticz" />
+        </div>
+        <div class="card">
+          <div class="person">majda</div>
+          <div class="amount">2 820 Kč</div>
+          <img src="qr/2025M12_Marada_majda.png" alt="QR platba majda" />
+        </div>
+        <div class="card">
+          <div class="person">mari</div>
+          <div class="amount">4 200 Kč</div>
+          <img src="qr/2025M12_Marada_mari.png" alt="QR platba mari" />
+        </div>
+        <div class="card">
+          <div class="person">sklepnik</div>
+          <div class="amount">1 440 Kč</div>
+          <img src="qr/2025M12_Marada_sklepnik.png" alt="QR platba sklepnik" />
+        </div>
+    </div>
+  </section>
+</body>
+</html>
