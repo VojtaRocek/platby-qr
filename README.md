@@ -117,18 +117,12 @@ Token platí do **23. června 2026** a je omezený **pouze na tento repozitář*
 
 ## Struktura spreadsheettu
 
-Pro správné fungování musí každý viditelný tab splňovat jedno z:
+Každý viditelný tab musí obsahovat:
+- Jména osob jako záhlaví sloupců
+- Sumy pro každou osobu
+- Číslo účtu, na které se platí (pokud není uvedeno, QR kód se nevygeneruje)
 
-**Formát A (Marada):**
-- Řádek 1: jména osob jako záhlaví sloupců
-- Řádek se sumami: celková suma + sumy pro každou osobu
-- Řádek „Platit na XXXX/YYYY": text obsahující `platit` a číslo účtu
-
-**Formát B (Olejari, Bidule):**
-- Řádek se záhlavím „Sumy": slovo „Sumy" v prvním sloupci, pak jména osob
-- Řádky pod ním: jednotlivé položky s částkami pro každou osobu
-- Poslední neprázdný řádek: součty za každou osobu
-- Číslo účtu: není potřeba (nebo ho lze přidat řádkem „Platit na")
+Detaily formátu jsou záměrně vynechány.
 
 ---
 
