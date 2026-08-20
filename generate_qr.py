@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shutil
+import time
 from pathlib import Path
 
 import qrcode
@@ -23,14 +24,33 @@ QR_DIR = DOCS_DIR / "qr"
 SKIP_HEADERS = {"v bal.", "czk", "cena za ks.", "kusu", "-", "sumy"}
 
 
+def fetch(url, **kwargs):
+    """GET with retries — Google občas vrátí 5xx, nemá smysl kvůli tomu spadnout."""
+    last_error = None
+    for attempt in range(5):
+        try:
+            r = requests.get(url, timeout=30, **kwargs)
+            r.raise_for_status()
+            return r
+        except (requests.HTTPError, requests.ConnectionError, requests.Timeout) as e:
+            status = getattr(e.response, "status_code", None)
+            if status is not None and status < 500 and status != 429:
+                raise
+            last_error = e
+            if attempt < 4:
+                delay = 2 ** attempt
+                print(f"  retry {attempt + 1}/4 za {delay}s ({e})")
+                time.sleep(delay)
+    raise last_error
+
+
 def get_visible_sheets():
     """Return list of visible sheets: [{name, gid}, ...]"""
     url = (
         f"https://sheets.googleapis.com/v4/spreadsheets/{SPREADSHEET_ID}"
         f"?fields=sheets.properties&key={API_KEY}"
     )
-    r = requests.get(url, timeout=30)
-    r.raise_for_status()
+    r = fetch(url)
     sheets = []
     for sheet in r.json().get("sheets", []):
         props = sheet["properties"]
@@ -45,8 +65,7 @@ def get_sheet_csv(gid):
         f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}"
         f"/export?format=csv&gid={gid}"
     )
-    r = requests.get(url, allow_redirects=True, timeout=30)
-    r.raise_for_status()
+    r = fetch(url, allow_redirects=True)
     return list(csv.reader(io.StringIO(r.text)))
 
 
